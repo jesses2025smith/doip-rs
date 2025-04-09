@@ -14,7 +14,7 @@ pub struct GatewayInfo {
 }
 
 #[derive(Debug, Clone, CopyGetters)]
-pub struct ExpectedPayloadType {
+pub(crate) struct ExpectedPayloadType {
     pub(crate) vid_payload_types: Vec<PayloadType>,
     pub(crate) es_payload_types: Vec<PayloadType>,
     pub(crate) dpm_payload_types: Vec<PayloadType>,
@@ -39,5 +39,6 @@ impl Default for ExpectedPayloadType {
 }
 
 lazy_static!(
+    /// ExpectedPayloadType
     pub(crate) static ref PL_TYPES: ExpectedPayloadType = Default::default();
 );

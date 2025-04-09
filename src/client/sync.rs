@@ -1,10 +1,15 @@
-use std::{io::{Read, Write}, net::{TcpStream, UdpSocket, SocketAddr}};
+mod stream;
+
+use std::net::{UdpSocket, SocketAddr};
 use iso13400_2::{*, request};
 use iso14229_1::{Configuration as Iso14229Cfg, response::Response as Iso14229Response, TryFromWithCfg};
+
+use stream::Stream;
 use crate::DoIpError;
 use super::{config::Configuration, context::{GatewayInfo, PL_TYPES}};
 
-type VerPayload = (Version, Payload);
+/// [`Version`] and [`Payload`]
+type VersionPayload = (Version, Payload);
 pub type RoutingActiveStatus = (ActiveCode, Option<u8>);
 
 #[derive(Debug)]
@@ -12,17 +17,17 @@ pub struct DoIpClient {
     config: Configuration,
     server_udp_addr: SocketAddr,
     udp_socket: UdpSocket,
-    tcp_stream: TcpStream,
+    stream: Stream,
     gateway_info: Option<GatewayInfo>,
 }
 
 impl DoIpClient {
     pub fn new(config: Configuration) -> Result<Self, DoIpError> {
-        let udp_socket = UdpSocket::bind(format!("{}:0", config.server_ip()))
+        let ip = config.server_ip();
+        let udp_socket = UdpSocket::bind(format!("{}:0", ip))
             .map_err(DoIpError::IoError)?;
-        let tcp_stream = TcpStream::connect(format!("{}:{}", config.server_ip(), TCP_SERVER_PORT))
-            .map_err(DoIpError::IoError)?;
-        let server_udp_addr = format!("{}:{}", config.server_ip(), UDP_SERVER_PORT)
+        let stream = Stream::connect(ip, None)?;
+        let server_udp_addr = format!("{}:{}", ip, UDP_SERVER_PORT)
             .parse::<SocketAddr>()
             .unwrap();
 
@@ -30,7 +35,7 @@ impl DoIpClient {
             config,
             server_udp_addr,
             udp_socket,
-            tcp_stream,
+            stream,
             gateway_info: None,
         })
     }
@@ -79,11 +84,9 @@ impl DoIpClient {
                 request::RoutingActive::new(src_addr, r#type, user_def)
             )
         };
-        let (_, resp) = self.tcp_write_read(request)?;
+        let (ver, resp) = self.tcp_write_read(request)?;
         match resp {
-            Payload::RespHeaderNegative(v) => {
-                Err(DoIpError::HeaderNegativeError(v.code()))
-            },
+            Payload::RespHeaderNegative(v) => Err(self.on_header_negative_error(v)),
             Payload::RespRoutingActive(v) => {
                 let dst_addr = v.dst_addr();
                 if src_addr != dst_addr {
@@ -112,7 +115,7 @@ impl DoIpClient {
                     },
                 }
             },
-            _ => unreachable!(),
+            _ => Err(DoIpError::UnexpectedResponse { version: ver, payload: resp }),
         }
     }
 
@@ -121,16 +124,14 @@ impl DoIpClient {
             version: self.gateway_version(),
             payload: Payload::ReqAliveCheck(request::AliveCheck)
         };
-        let (_, resp) = self.tcp_write_read(request)?;
+        let (ver, resp) = self.tcp_write_read(request)?;
         match resp {
-            Payload::RespHeaderNegative(v) => {
-                Err(DoIpError::HeaderNegativeError(v.code()))
-            },
+            Payload::RespHeaderNegative(v) => Err(self.on_header_negative_error(v)),
             Payload::RespAliveCheck(v) => {
                 log::info!("DoIPClient - alive check: {:?}", v.src_addr());
                 Ok(())
             },
-            _ => unreachable!(),
+            _ => Err(DoIpError::UnexpectedResponse { version: ver, payload: resp }),
         }
     }
 
@@ -139,13 +140,11 @@ impl DoIpClient {
             version: self.gateway_version(),
             payload: Payload::ReqEntityStatus(request::EntityStatus)
         };
-        let (_, resp) = self.udp_send_recv(request)?;
+        let (ver, resp) = self.udp_send_recv(request)?;
         match resp {
-            Payload::RespHeaderNegative(v) => {
-                Err(DoIpError::HeaderNegativeError(v.code()))
-            },
+            Payload::RespHeaderNegative(v) => Err(self.on_header_negative_error(v)),
             Payload::RespEntityStatus(v) => Ok(v),
-            _ => unreachable!(),
+            _ => Err(DoIpError::UnexpectedResponse { version: ver, payload: resp }),
         }
     }
 
@@ -154,15 +153,13 @@ impl DoIpClient {
             version: self.gateway_version(),
             payload: Payload::ReqDiagPowerMode(request::DiagnosticPowerMode)
         };
-        let (_, resp) = self.udp_send_recv(request)?;
+        let (ver, resp) = self.udp_send_recv(request)?;
         match resp {
-            Payload::RespHeaderNegative(v) => {
-                Err(DoIpError::HeaderNegativeError(v.code()))
-            },
+            Payload::RespHeaderNegative(v) => Err(self.on_header_negative_error(v)),
             Payload::RespDiagPowerMode(v) => {
                 Ok(v.mode())
             },
-            _ => unreachable!(),
+            _ => Err(DoIpError::UnexpectedResponse { version: ver, payload: resp }),
         }
     }
 
@@ -177,11 +174,9 @@ impl DoIpClient {
                 Diagnostic::new(self.config.address(), address, data)
             )
         };
-        let (_, resp) = self.tcp_write_read(request)?;
+        let (ver, resp) = self.tcp_write_read(request)?;
         match resp {
-            Payload::RespHeaderNegative(v) => {
-                Err(DoIpError::HeaderNegativeError(v.code()))
-            },
+            Payload::RespHeaderNegative(v) => Err(self.on_header_negative_error(v)),
             Payload::RespDiagNegative(v) => {
                 log::warn!("DoIPClient - {}", v);
                 Err(DoIpError::DiagnosticNegativeError {
@@ -191,7 +186,7 @@ impl DoIpClient {
             },
             Payload::RespDiagPositive(v) => {
                 log::debug!("DoIPClient - Diagnostic message ACK: {}", v);
-                let (_, payload) = self.tcp_read(&PL_TYPES.diag_data_payload_types)?;
+                let (ver, payload) = self.tcp_read(&PL_TYPES.diag_data_payload_types)?;
                 match payload {
                     Payload::Diagnostic(v) => {
                         let data = v.data;
@@ -202,19 +197,22 @@ impl DoIpClient {
 
                         Ok(resp)
                     },
-                    _ => unreachable!(),
+                    _ => Err(DoIpError::UnexpectedResponse { version: ver, payload }),
                 }
             },
-            _ => unreachable!(),
+            _ => Err(DoIpError::UnexpectedResponse { version: ver, payload: resp }),
         }
     }
 
     #[inline]
-    fn vehicle_id_response(&mut self, (ver, resp): VerPayload) -> Result<(), DoIpError> {
+    pub fn reconnect(&mut self) -> Result<(), DoIpError> {
+        self.stream.reconnect(self.config.server_ip(), None)
+    }
+
+    #[inline]
+    fn vehicle_id_response(&mut self, (ver, resp): VersionPayload) -> Result<(), DoIpError> {
         match resp {
-            Payload::RespHeaderNegative(v) => {
-                Err(DoIpError::HeaderNegativeError(v.code()))
-            },
+            Payload::RespHeaderNegative(v) => Err(self.on_header_negative_error(v)),
             Payload::RespVehicleId(v) => {
                 self.gateway_info = Some(GatewayInfo {
                     version: ver,
@@ -227,11 +225,11 @@ impl DoIpClient {
 
                 Ok(())
             },
-            _ => unreachable!(),
+            _ => Err(DoIpError::UnexpectedResponse { version: ver, payload: resp }),
         }
     }
 
-    fn udp_send_recv(&mut self, request: Message) -> Result<VerPayload, DoIpError> {
+    fn udp_send_recv(&mut self, request: Message) -> Result<VersionPayload, DoIpError> {
         let payload_type = request.payload.payload_type();
         let expect = match payload_type {
             PayloadType::ReqVehicleId => Some(&PL_TYPES.vid_payload_types),
@@ -258,7 +256,7 @@ impl DoIpClient {
         self.parse_response(&buffer[..size], expect)
     }
 
-    fn tcp_write_read(&mut self, request: Message) -> Result<VerPayload, DoIpError> {
+    fn tcp_write_read(&mut self, request: Message) -> Result<VersionPayload, DoIpError> {
         let payload_type = request.payload.payload_type();
         let expect = match payload_type {
             PayloadType::ReqRoutingActive => Some(&PL_TYPES.ra_payload_types),
@@ -269,8 +267,7 @@ impl DoIpClient {
             .ok_or(DoIpError::InputError(format!("invalid udp request payload: {:?}", payload_type)))?;
         let data: Vec<_> = request.into();
         log::trace!("DoIPClient - TCP writing data: {}", hex::encode(&data));
-        let size = self.tcp_stream.write(&data)
-            .map_err(DoIpError::IoError)?;
+        let size = self.stream.write(&data)?;
         let data_len = data.len();
         if size != data_len {
             log::warn!("DoIPClient - TCP wrote {} bytes, expect {}", size, data_len);
@@ -282,10 +279,9 @@ impl DoIpClient {
     }
 
     #[inline]
-    fn tcp_read(&mut self, expected: &Vec<PayloadType>) -> Result<VerPayload, DoIpError> {
+    fn tcp_read(&mut self, expected: &Vec<PayloadType>) -> Result<VersionPayload, DoIpError> {
         let mut buffer = [0; 4096];
-        let size = self.tcp_stream.read(&mut buffer)
-            .map_err(DoIpError::IoError)?;
+        let size = self.stream.read(&mut buffer)?;
 
         self.parse_response(&buffer[..size], expected)
     }
@@ -295,7 +291,7 @@ impl DoIpClient {
         &mut self,
         data: &[u8],
         expected: &Vec<PayloadType>,
-    ) -> Result<VerPayload, DoIpError> {
+    ) -> Result<VersionPayload, DoIpError> {
         let response = Message::try_from(data)
             .map_err(DoIpError::Iso13400Error)?;
         let version = response.version;
@@ -325,5 +321,20 @@ impl DoIpClient {
             Some(info) => info.version,
             None => Version::Default,
         }
+    }
+
+    #[inline]
+    fn on_header_negative_error(&mut self, header: response::HeaderNegative) -> DoIpError {
+        let code = header.code();
+        match code {
+            HeaderNegativeCode::IncorrectPatternFormat |
+            HeaderNegativeCode::InvalidPayloadLength => {
+                self.stream
+                    .shutdown()
+                    .unwrap_or_else(|e| log::warn!("Error: {} when shutdown", e));
+            },
+            _ => {},
+        }
+        DoIpError::HeaderNegativeError(code)
     }
 }

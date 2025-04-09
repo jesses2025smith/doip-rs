@@ -27,20 +27,21 @@ version = "1"
 optional = true
 features = ["net", "time"]
 
-#[dependencies.native-tls]
-#workspace = true
-#optional = true
+[dependencies.native-tls]
+version = "0.2"
+optional = true
 
-#[dependencies.tokio-native-tls]
-#workspace = true
-#optional = true
+[dependencies.tokio-native-tls]
+version = "0.3"
+optional = true
 
 [dev-dependencies]
 anyhow = "1"
 
 [features]
 default = ["client", ]
-async = []
+async = ["tokio", "tokio-native-tls"]
+develop = []
 
-client = []
+client = ["native-tls", ]
 server = []

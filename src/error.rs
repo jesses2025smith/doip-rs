@@ -1,4 +1,4 @@
-use iso13400_2::{ActiveCode, DiagnosticNegativeCode, HeaderNegativeCode, Iso13400Error, PayloadType};
+use iso13400_2::{ActiveCode, DiagnosticNegativeCode, HeaderNegativeCode, Iso13400Error, Payload, PayloadType, Version};
 use iso14229_1::Iso14229Error;
 
 #[derive(Debug, thiserror::Error)]
@@ -10,6 +10,8 @@ pub enum DoIpError {
 
     #[error("DoIP - io error: {0}")]
     IoError(std::io::Error),
+    #[error("DoIP - tls error: {0}")]
+    TlsError(String),
 
     #[error("DoIP - {0}")]
     Iso13400Error(Iso13400Error),
@@ -22,4 +24,6 @@ pub enum DoIpError {
     ActiveError(ActiveCode),
     #[error("DoIP - diagnostic negative code: {code:?}, previous diagnostic message: {data}")]
     DiagnosticNegativeError { code: DiagnosticNegativeCode, data: String },
+    #[error("DoIP - unexpected response, version: {version:?}, payload: {payload:?}")]
+    UnexpectedResponse { version: Version, payload: Payload }
 }

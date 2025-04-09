@@ -18,7 +18,7 @@ impl Configuration {
         match format!("{}:{}", server_ip, TCP_SERVER_PORT).parse::<SocketAddr>() {
             Ok(_) => Some(Self {
                 server_ip: server_ip.to_owned(),
-                address
+                address,
             }),
             Err(_) => None,
         }
