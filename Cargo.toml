@@ -1,0 +1,46 @@
+[package]
+name = "doip-rs"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR GPL-3.0"
+authors = ["Jesse Smith <jesses2025smith@gmail.com>"]
+description = "A DoIP protocol."
+homepage = "https://github.com/jesses2025smith/doip-rs"
+repository = "https://github.com/jesses2025smith/doip-rs"
+keywords = [
+    "automotive",
+    "UDS",
+    "DoIP"
+]
+
+[dependencies]
+log = "0.4"
+thiserror = "2"
+getset = "0.1"
+hex = "0.4"
+lazy_static = "1.5"
+iso13400-2 = "0.1.0-alpha4"
+iso14229-1 = "0.1.0-alpha4"
+
+[dependencies.tokio]
+version = "1"
+optional = true
+features = ["net", "time"]
+
+#[dependencies.native-tls]
+#workspace = true
+#optional = true
+
+#[dependencies.tokio-native-tls]
+#workspace = true
+#optional = true
+
+[dev-dependencies]
+anyhow = "1"
+
+[features]
+default = ["client", ]
+async = []
+
+client = []
+server = []
