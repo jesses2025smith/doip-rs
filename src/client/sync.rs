@@ -19,6 +19,7 @@ pub struct DoIpClient {
     udp_socket: UdpSocket,
     stream: Stream,
     gateway_info: Option<GatewayInfo>,
+    // iso14229cfg: Iso14229Cfg,
 }
 
 impl DoIpClient {
@@ -90,7 +91,7 @@ impl DoIpClient {
             Payload::RespRoutingActive(v) => {
                 let dst_addr = v.dst_addr();
                 if src_addr != dst_addr {
-                    log::warn!("DoIPClient - routing active receive a message that target address: {:?}", dst_addr);
+                    rsutil::warn!("DoIPClient - routing active receive a message that target address: {:?}", dst_addr);
                 }
 
                 let active_code = v.active_code();
@@ -106,11 +107,11 @@ impl DoIpClient {
                     ActiveCode::Unsupported |
                     ActiveCode::TLSRequired => Err(DoIpError::ActiveError(active_code)),
                     ActiveCode::VMSpecific(v) => {
-                        log::info!("DoIPClient - routing active receive VM Specific value: {}", v);
+                        rsutil::info!("DoIPClient - routing active receive VM Specific value: {}", v);
                         Ok((active_code, Some(v)))
                     },
                     ActiveCode::Reserved(v) => {
-                        log::warn!("DoIPClient - routing active receive Reserved value: {}", v);
+                        rsutil::warn!("DoIPClient - routing active receive Reserved value: {}", v);
                         Ok((active_code, Some(v)))
                     },
                 }
@@ -128,7 +129,7 @@ impl DoIpClient {
         match resp {
             Payload::RespHeaderNegative(v) => Err(self.on_header_negative_error(v)),
             Payload::RespAliveCheck(v) => {
-                log::info!("DoIPClient - alive check: {:?}", v.src_addr());
+                rsutil::info!("DoIPClient - alive check: {:?}", v.src_addr());
                 Ok(())
             },
             _ => Err(DoIpError::UnexpectedResponse { version: ver, payload: resp }),
@@ -178,19 +179,19 @@ impl DoIpClient {
         match resp {
             Payload::RespHeaderNegative(v) => Err(self.on_header_negative_error(v)),
             Payload::RespDiagNegative(v) => {
-                log::warn!("DoIPClient - {}", v);
+                rsutil::warn!("DoIPClient - {}", v);
                 Err(DoIpError::DiagnosticNegativeError {
                     code: v.code(),
-                    data: hex::encode(v.previous_diagnostic_data())
+                    data: hex::encode(v.pre_diag_data())
                 })
             },
             Payload::RespDiagPositive(v) => {
-                log::debug!("DoIPClient - Diagnostic message ACK: {}", v);
+                rsutil::debug!("DoIPClient - Diagnostic message ACK: {}", v);
                 let (ver, payload) = self.tcp_read(&PL_TYPES.diag_data_payload_types)?;
                 match payload {
                     Payload::Diagnostic(v) => {
                         let data = v.data;
-                        log::debug!("DoIPClient - diagnostic Data: {:?}", hex::encode(&data));
+                        rsutil::debug!("DoIPClient - diagnostic Data: {:?}", hex::encode(&data));
                         let cfg = Iso14229Cfg::default();
                         let resp = Iso14229Response::try_from_cfg(data, &cfg)
                             .map_err(DoIpError::Iso14229Error)?;
@@ -241,12 +242,12 @@ impl DoIpClient {
         }
             .ok_or(DoIpError::InputError(format!("invalid udp request payload: {:?}", payload_type)))?;
         let data: Vec<_> = request.into();
-        log::trace!("DoIPClient - UDP writing data: {}", hex::encode(&data));
+        rsutil::trace!("DoIPClient - UDP writing data: {}", hex::encode(&data));
         let size = self.udp_socket.send_to(&data, &self.server_udp_addr)
             .map_err(DoIpError::IoError)?;
         let data_len = data.len();
         if size != data_len {
-            log::warn!("DoIPClient - UDP wrote {} bytes, expect {}", size, data_len);
+            rsutil::warn!("DoIPClient - UDP wrote {} bytes, expect {}", size, data_len);
         }
 
         let mut buffer = [0; 1024];
@@ -266,11 +267,11 @@ impl DoIpClient {
         }
             .ok_or(DoIpError::InputError(format!("invalid udp request payload: {:?}", payload_type)))?;
         let data: Vec<_> = request.into();
-        log::trace!("DoIPClient - TCP writing data: {}", hex::encode(&data));
+        rsutil::trace!("DoIPClient - TCP writing data: {}", hex::encode(&data));
         let size = self.stream.write(&data)?;
         let data_len = data.len();
         if size != data_len {
-            log::warn!("DoIPClient - TCP wrote {} bytes, expect {}", size, data_len);
+            rsutil::warn!("DoIPClient - TCP wrote {} bytes, expect {}", size, data_len);
             Err(DoIpError::IoError(std::io::Error::last_os_error()))
         }
         else {
@@ -309,7 +310,7 @@ impl DoIpClient {
     fn version_check(&self, version: Version) {
         match &self.gateway_info {
             Some(info) => if info.version() != version {
-                log::warn!("DoIPClient - DoIP version mismatch!");
+                rsutil::warn!("DoIPClient - DoIP version mismatch!");
             },
             None => {},
         }
@@ -331,7 +332,7 @@ impl DoIpClient {
             HeaderNegativeCode::InvalidPayloadLength => {
                 self.stream
                     .shutdown()
-                    .unwrap_or_else(|e| log::warn!("Error: {} when shutdown", e));
+                    .unwrap_or_else(|e| rsutil::warn!("Error: {} when shutdown", e));
             },
             _ => {},
         }

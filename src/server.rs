@@ -114,7 +114,7 @@ impl DoIpServer {
     fn tcp_service(&mut self) -> Result<(), DoIpError> {
         loop {
             if let Ok((tcp_stream, addr)) = self.tcp_listener.accept() {
-                log::info!("Connection established with {}", addr);
+                rsutil::info!("Connection established with {}", addr);
                 match self.tcp_streams.lock() {
                     Ok(mut streams) => {
                         streams.remove(&addr);
@@ -134,7 +134,7 @@ impl DoIpServer {
             .map_err(DoIpError::IoError)?;
         let data_len = data.len();
         if size < data_len {
-            log::warn!("DoIPServer - udp send size: {}, expect: {}", size, data_len);
+            rsutil::warn!("DoIPServer - udp send size: {}, expect: {}", size, data_len);
         }
 
         Ok(())

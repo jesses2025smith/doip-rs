@@ -14,13 +14,14 @@ keywords = [
 ]
 
 [dependencies]
-log = "0.4"
-thiserror = "2"
 getset = "0.1"
 hex = "0.4"
+iso13400-2 = "0.1.0-alpha8"
+iso14229-1 = "0.1.0-alpha8"
 lazy_static = "1.5"
-iso13400-2 = "0.1.0-alpha4"
-iso14229-1 = "0.1.0-alpha4"
+log = "0.4"
+rsutil = "0.1"
+thiserror = "2"
 
 [dependencies.tokio]
 version = "1"
